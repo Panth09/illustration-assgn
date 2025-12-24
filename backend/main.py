@@ -255,12 +255,12 @@ if __name__ == "__main__":
     import uvicorn
     import os
 
-    # Render uses PORT environment variable
+    # CRITICAL: Use PORT from environment (Render requirement)
     port = int(os.getenv("PORT", 8000))
     
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",  # Must be 0.0.0.0, not API_HOST
+        host="0.0.0.0",  # Must be 0.0.0.0 for Render
         port=port,
         reload=False,
         workers=1,

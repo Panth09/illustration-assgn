@@ -15,23 +15,19 @@ class FaceDetector:
         self.device = DEVICE
         self._initialize()
 
-def _initialize(self):
-    """Initialize the face analysis model"""
-    try:
-        import os
-        # Set timeout for model downloads
-        os.environ['INSIGHTFACE_DOWNLOAD_TIMEOUT'] = '600'
-        
-        self.app = FaceAnalysis(
-            name=INSIGHTFACE_MODEL,
-            root="models",
-            providers=["CPUExecutionProvider"],  # Remove CUDA on Render
-        )
-        self.app.prepare(ctx_id=-1)  # Always use CPU
-        logger.info("InsightFace model initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize InsightFace: {e}")
-        raise
+    def _initialize(self):
+        """Initialize the face analysis model"""
+        try:
+            self.app = FaceAnalysis(
+                name=INSIGHTFACE_MODEL,
+                root="models",
+                providers=["CPUExecutionProvider"],  # Force CPU for Render
+            )
+            self.app.prepare(ctx_id=-1)  # -1 = CPU
+            logger.info("InsightFace model initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize InsightFace: {e}")
+            raise
 
     def detect_face(self, image_path):
         """
