@@ -13,12 +13,6 @@ RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
     libxext-dev \
-    libharfbuzz0b \
-    libwebp6 \
-    libtiff5 \
-    libjasper1 \
-    libjpeg-dev \
-    libpng-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements from backend
