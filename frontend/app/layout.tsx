@@ -4,6 +4,9 @@ import '../styles/globals.css';
 export const metadata: Metadata = {
   title: 'Illustration Personalizer',
   description: 'Personalize illustrations with your child\'s photo',
+  icons: {
+    icon: '/favicon.svg',
+  },
 };
 
 export default function RootLayout({
