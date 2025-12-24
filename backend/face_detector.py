@@ -16,14 +16,18 @@ class FaceDetector:
         self._initialize()
 
     def _initialize(self):
-        """Initialize the face analysis model"""
+        """Initialize the face analysis model with minimal memory footprint"""
         try:
+            import os
+            os.environ['OMP_NUM_THREADS'] = '1'
+            
             self.app = FaceAnalysis(
                 name=INSIGHTFACE_MODEL,
                 root="models",
-                providers=["CPUExecutionProvider"],  # Force CPU for Render
+                providers=["CPUExecutionProvider"],
             )
-            self.app.prepare(ctx_id=-1)  # -1 = CPU
+            # Use smaller detection size to reduce memory
+            self.app.prepare(ctx_id=-1, det_size=(320, 320))
             logger.info("InsightFace model initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize InsightFace: {e}")
@@ -43,6 +47,15 @@ class FaceDetector:
             image = cv2.imread(str(image_path))
             if image is None:
                 raise ValueError(f"Failed to load image: {image_path}")
+
+            # Resize image if too large to save memory
+            h, w = image.shape[:2]
+            max_dim = 1024
+            if max(h, w) > max_dim:
+                scale = max_dim / max(h, w)
+                new_w, new_h = int(w * scale), int(h * scale)
+                image = cv2.resize(image, (new_w, new_h))
+                logger.info(f"Resized image from {w}x{h} to {new_w}x{new_h}")
 
             # Detect faces
             faces = self.app.get(image)

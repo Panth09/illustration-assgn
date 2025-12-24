@@ -9,6 +9,9 @@ from datetime import datetime
 import cv2
 import asyncio
 from threading import Thread
+from PIL import Image
+import io
+import gc
 
 from config import UPLOAD_DIR, OUTPUT_DIR, MAX_UPLOAD_SIZE, API_HOST, API_PORT
 from face_detector import FaceDetector
@@ -43,6 +46,26 @@ illustration_styler = None
 models_ready = False
 
 
+def compress_image(file_content: bytes, max_size: tuple = (1024, 1024)) -> bytes:
+    """Compress image to reduce memory usage"""
+    try:
+        img = Image.open(io.BytesIO(file_content))
+        
+        # Convert RGBA to RGB if needed
+        if img.mode == 'RGBA':
+            img = img.convert('RGB')
+        
+        # Resize if too large
+        img.thumbnail(max_size, Image.Resampling.LANCZOS)
+        
+        output = io.BytesIO()
+        img.save(output, format='JPEG', quality=85, optimize=True)
+        return output.getvalue()
+    except Exception as e:
+        logger.error(f"Image compression failed: {e}")
+        raise
+
+
 def initialize_models():
     """Initialize ML models in background"""
     global face_detector, illustration_styler, models_ready
@@ -52,6 +75,9 @@ def initialize_models():
         illustration_styler = IllustrationStyler()
         models_ready = True
         logger.info("Models initialized successfully")
+        
+        # Force garbage collection after loading
+        gc.collect()
     except Exception as e:
         logger.error(f"Failed to initialize models: {e}")
         models_ready = False
@@ -100,27 +126,38 @@ async def detect_face(file: UploadFile = File(...)):
     if not face_detector:
         raise HTTPException(status_code=503, detail="Face detector not initialized")
 
+    temp_file_path = None
     try:
         # Validate file size
         content = await file.read()
         if len(content) > MAX_UPLOAD_SIZE:
-            raise HTTPException(status_code=413, detail="File too large")
+            raise HTTPException(status_code=413, detail="File too large. Maximum 5MB allowed.")
+
+        # Compress image
+        logger.info(f"Original size: {len(content)} bytes")
+        content = compress_image(content, max_size=(800, 800))
+        logger.info(f"Compressed size: {len(content)} bytes")
 
         # Save uploaded file
         file_id = str(uuid.uuid4())
-        file_ext = Path(file.filename).suffix
-        file_path = UPLOAD_DIR / f"{file_id}{file_ext}"
+        file_ext = ".jpg"  # Always save as JPEG after compression
+        temp_file_path = UPLOAD_DIR / f"{file_id}{file_ext}"
 
-        with open(file_path, "wb") as f:
+        with open(temp_file_path, "wb") as f:
             f.write(content)
 
         # Detect faces
-        results = face_detector.detect_face(str(file_path))
+        results = face_detector.detect_face(str(temp_file_path))
+
+        # Clean up immediately
+        if temp_file_path and temp_file_path.exists():
+            temp_file_path.unlink()
+        
+        gc.collect()
 
         return {
             "success": True,
             "file_id": file_id,
-            "file_path": str(file_path),
             "detection_results": results,
         }
 
@@ -129,6 +166,14 @@ async def detect_face(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Face detection error: {e}")
         raise HTTPException(status_code=500, detail=f"Detection failed: {str(e)}")
+    finally:
+        # Ensure cleanup
+        if temp_file_path and temp_file_path.exists():
+            try:
+                temp_file_path.unlink()
+            except:
+                pass
+        gc.collect()
 
 
 @app.post("/personalize")
@@ -150,42 +195,82 @@ async def personalize_illustration(
 
     child_photo_path = None
     illustration_path = None
+    output_path = None
 
     try:
-        # Save child photo
+        logger.info("Starting personalization request...")
+        
+        # Save and compress child photo
         child_content = await child_photo.read()
         if len(child_content) > MAX_UPLOAD_SIZE:
-            raise HTTPException(status_code=413, detail="Child photo file too large")
+            raise HTTPException(status_code=413, detail="Child photo too large. Maximum 5MB.")
+
+        logger.info(f"Child photo original size: {len(child_content)} bytes")
+        child_content = compress_image(child_content, max_size=(800, 800))
+        logger.info(f"Child photo compressed size: {len(child_content)} bytes")
 
         child_file_id = str(uuid.uuid4())
-        child_file_ext = Path(child_photo.filename).suffix
-        child_photo_path = UPLOAD_DIR / f"{child_file_id}_child{child_file_ext}"
+        child_photo_path = UPLOAD_DIR / f"{child_file_id}_child.jpg"
 
         with open(child_photo_path, "wb") as f:
             f.write(child_content)
 
-        # Save illustration
+        # Save and compress illustration
         illust_content = await illustration.read()
         if len(illust_content) > MAX_UPLOAD_SIZE:
-            raise HTTPException(status_code=413, detail="Illustration file too large")
+            raise HTTPException(status_code=413, detail="Illustration too large. Maximum 5MB.")
+
+        logger.info(f"Illustration original size: {len(illust_content)} bytes")
+        illust_content = compress_image(illust_content, max_size=(1024, 1024))
+        logger.info(f"Illustration compressed size: {len(illust_content)} bytes")
 
         illust_file_id = str(uuid.uuid4())
-        illust_file_ext = Path(illustration.filename).suffix
-        illustration_path = UPLOAD_DIR / f"{illust_file_id}_template{illust_file_ext}"
+        illustration_path = UPLOAD_DIR / f"{illust_file_id}_template.jpg"
 
         with open(illustration_path, "wb") as f:
             f.write(illust_content)
 
-        # Process personalization
-        result_image = illustration_styler.process(
-            str(child_photo_path), str(illustration_path)
-        )
+        logger.info("Files saved, starting processing...")
+        
+        # Process with timeout
+        async def process_with_timeout():
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                illustration_styler.process,
+                str(child_photo_path),
+                str(illustration_path)
+            )
+        
+        try:
+            result_image = await asyncio.wait_for(
+                process_with_timeout(), 
+                timeout=120.0  # 2 minute timeout
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=504, 
+                detail="Processing timeout - please try with smaller images"
+            )
 
         # Save output
         output_file_id = str(uuid.uuid4())
         output_path = OUTPUT_DIR / f"{output_file_id}_personalized.png"
 
-        cv2.imwrite(str(output_path), result_image)
+        # Compress output before saving
+        cv2.imwrite(str(output_path), result_image, [cv2.IMWRITE_PNG_COMPRESSION, 6])
+        
+        logger.info("Processing completed successfully")
+
+        # Clean up input files immediately
+        if child_photo_path and child_photo_path.exists():
+            child_photo_path.unlink()
+        if illustration_path and illustration_path.exists():
+            illustration_path.unlink()
+        
+        # Force garbage collection
+        del result_image, child_content, illust_content
+        gc.collect()
 
         return {
             "success": True,
@@ -199,12 +284,24 @@ async def personalize_illustration(
     except Exception as e:
         logger.error(f"Personalization error: {e}")
         raise HTTPException(status_code=500, detail=f"Personalization failed: {str(e)}")
+    finally:
+        # Cleanup all temporary files
+        for path in [child_photo_path, illustration_path]:
+            if path and path.exists():
+                try:
+                    path.unlink()
+                except Exception as cleanup_error:
+                    logger.warning(f"Cleanup failed for {path}: {cleanup_error}")
+        gc.collect()
 
 
 @app.get("/download/{file_id}")
 async def download_result(file_id: str):
-    """Download personalized illustration"""
+    """
+    Download personalized illustration
+    """
     try:
+        # Find file with this ID
         file_path = None
         for f in OUTPUT_DIR.glob(f"{file_id}*"):
             file_path = f
@@ -224,15 +321,19 @@ async def download_result(file_id: str):
 
 @app.post("/upload-illustration-template")
 async def upload_template(file: UploadFile = File(...)):
-    """Upload an illustration template for future use"""
+    """
+    Upload an illustration template for future use
+    """
     try:
         content = await file.read()
         if len(content) > MAX_UPLOAD_SIZE:
-            raise HTTPException(status_code=413, detail="File too large")
+            raise HTTPException(status_code=413, detail="File too large. Maximum 5MB.")
+
+        # Compress template
+        content = compress_image(content, max_size=(1024, 1024))
 
         file_id = str(uuid.uuid4())
-        file_ext = Path(file.filename).suffix
-        file_path = UPLOAD_DIR / f"{file_id}_template{file_ext}"
+        file_path = UPLOAD_DIR / f"{file_id}_template.jpg"
 
         with open(file_path, "wb") as f:
             f.write(content)

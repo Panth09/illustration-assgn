@@ -5,6 +5,7 @@ import logging
 from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
 from transformers import CLIPTextModel
 import cv2
+import gc
 
 logger = logging.getLogger(__name__)
 
@@ -15,23 +16,19 @@ class IllustrationStyler:
     This uses a combination of face detection and style transfer
     """
 
-    def __init__(self, device="cuda"):
+    def __init__(self, device="cpu"):
         self.device = device
-        self.dtype = torch.float16 if device == "cuda" else torch.float32
+        self.dtype = torch.float32  # Always use float32 on CPU to save memory
         self.pipeline = None
         self._initialize()
 
     def _initialize(self):
         """Initialize the Stable Diffusion pipeline with ControlNet"""
         try:
-            # Using a cartoon/illustration style prompt-based approach
-            # For production, you'd use a specialized illustration ControlNet
             logger.info("Initializing illustration styling pipeline...")
-
-            # Load base model
-            self.pipeline = None  # Will be lazy-loaded on first use
+            # Pipeline will be lazy-loaded only if needed
+            self.pipeline = None
             logger.info("Illustration pipeline ready for lazy loading")
-
         except Exception as e:
             logger.error(f"Failed to initialize pipeline: {e}")
             raise
@@ -49,6 +46,17 @@ class IllustrationStyler:
         """
         try:
             image = cv2.imread(str(image_path))
+            
+            # Resize if too large
+            h, w = image.shape[:2]
+            max_dim = 1024
+            if max(h, w) > max_dim:
+                scale = max_dim / max(h, w)
+                new_w, new_h = int(w * scale), int(h * scale)
+                image = cv2.resize(image, (new_w, new_h))
+                # Scale bbox coordinates
+                face_bbox = [int(coord * scale) for coord in face_bbox]
+            
             x1, y1, x2, y2 = [int(v) for v in face_bbox]
 
             # Add padding
@@ -69,7 +77,7 @@ class IllustrationStyler:
     def stylize_face(self, face_image):
         """
         Convert face to stylized/illustrated version
-        Currently uses a cartoon filter approach. In production, use specialized model.
+        Memory-optimized cartoon filter approach
 
         Args:
             face_image: Face image array (BGR)
@@ -78,14 +86,19 @@ class IllustrationStyler:
             Stylized face image
         """
         try:
+            # Resize if too large to save memory
+            h, w = face_image.shape[:2]
+            max_size = 512
+            if max(h, w) > max_size:
+                scale = max_size / max(h, w)
+                new_w, new_h = int(w * scale), int(h * scale)
+                face_image = cv2.resize(face_image, (new_w, new_h))
+            
             # Convert BGR to RGB
             face_rgb = cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB)
 
-            # Apply cartoon filter using edge-preserving filters
-            # This is a simplified approach - in production use ML-based stylization
-
             # Bilateral filtering for smoothing while preserving edges
-            smooth = cv2.bilateralFilter(face_rgb, 9, 75, 75)
+            smooth = cv2.bilateralFilter(face_rgb, 7, 50, 50)  # Reduced kernel size
 
             # Detect edges
             gray = cv2.cvtColor(smooth, cv2.COLOR_RGB2GRAY)
@@ -96,18 +109,24 @@ class IllustrationStyler:
             edges = 255 - edges
 
             # Combine
-            stylized = cv2.bitwise_and(smooth, smooth, mask=cv2.cvtColor(edges, cv2.COLOR_RGB2GRAY))
+            mask = cv2.cvtColor(edges, cv2.COLOR_RGB2GRAY)
+            stylized = cv2.bitwise_and(smooth, smooth, mask=mask)
 
-            # Quantize colors for cartoon effect
+            # Quantize colors for cartoon effect (reduced clusters)
             data = stylized.reshape((-1, 3))
             data = np.float32(data)
             criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-            _, labels, centers = cv2.kmeans(data, 6, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+            _, labels, centers = cv2.kmeans(data, 5, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
             centers = np.uint8(centers)
             result = centers[labels.flatten()]
             stylized = result.reshape(stylized.shape)
 
             logger.info("Face stylization completed")
+            
+            # Clear memory
+            del data, labels, centers, result, smooth, edges, mask
+            gc.collect()
+            
             return stylized
 
         except Exception as e:
@@ -132,7 +151,16 @@ class IllustrationStyler:
             if illustration is None:
                 raise ValueError(f"Failed to load illustration: {illustration_path}")
 
-            # Resize stylized face to fit coordinates
+            # Resize illustration if too large
+            h, w = illustration.shape[:2]
+            max_dim = 1024
+            if max(h, w) > max_dim:
+                scale = max_dim / max(h, w)
+                new_w, new_h = int(w * scale), int(h * scale)
+                illustration = cv2.resize(illustration, (new_w, new_h))
+                # Scale coordinates
+                face_coords = tuple(int(coord * scale) for coord in face_coords)
+
             x1, y1, x2, y2 = face_coords
             target_h = y2 - y1
             target_w = x2 - x1
@@ -140,20 +168,19 @@ class IllustrationStyler:
             # Resize stylized face to match target dimensions
             resized_face = cv2.resize(stylized_face, (target_w, target_h))
 
-            # Create mask for smooth blending
-            mask = np.ones((target_h, target_w, 3), dtype=np.uint8) * 255
-
-            # Use Poisson blending for seamless integration
-            # For simplicity, direct overlay with alpha blending
+            # Blend with alpha
             alpha = 0.8
             result = illustration.copy()
-
-            # Blend
             result[y1:y2, x1:x2] = cv2.addWeighted(
                 resized_face, alpha, illustration[y1:y2, x1:x2], 1 - alpha, 0
             )
 
             logger.info(f"Face inserted into illustration at coords {face_coords}")
+            
+            # Clear memory
+            del illustration, resized_face
+            gc.collect()
+            
             return result
 
         except Exception as e:
@@ -193,6 +220,11 @@ class IllustrationStyler:
             result = self.insert_face_into_illustration(illustration_template_path, stylized, coords)
 
             logger.info("Personalization process completed successfully")
+            
+            # Clear memory
+            del detector, face_data, face_region, stylized
+            gc.collect()
+            
             return result
 
         except Exception as e:

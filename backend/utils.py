@@ -1,17 +1,19 @@
 import logging
 from pathlib import Path
 from datetime import datetime
+import gc
 
 logger = logging.getLogger(__name__)
 
 
-def cleanup_old_files(directory: Path, max_age_hours: int = 24):
+def cleanup_old_files(directory: Path, max_age_hours: int = 1):
     """
     Clean up old uploaded files to save storage
+    More aggressive cleanup for memory-constrained environments
 
     Args:
         directory: Directory to clean
-        max_age_hours: Delete files older than this
+        max_age_hours: Delete files older than this (reduced to 1 hour)
     """
     try:
         from time import time
@@ -29,6 +31,9 @@ def cleanup_old_files(directory: Path, max_age_hours: int = 24):
 
         if deleted_count > 0:
             logger.info(f"Cleaned up {deleted_count} old files from {directory}")
+        
+        # Force garbage collection after cleanup
+        gc.collect()
 
     except Exception as e:
         logger.error(f"Cleanup failed: {e}")
@@ -48,7 +53,13 @@ def validate_image_file(file_path: Path) -> bool:
         import cv2
 
         img = cv2.imread(str(file_path))
-        return img is not None and img.size > 0
+        result = img is not None and img.size > 0
+        
+        # Clean up immediately
+        del img
+        gc.collect()
+        
+        return result
 
     except Exception as e:
         logger.error(f"Image validation failed: {e}")

@@ -4,6 +4,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Memory optimization
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+
 # Directories
 UPLOAD_DIR = Path("uploads")
 OUTPUT_DIR = Path("outputs")
@@ -21,7 +26,7 @@ API_WORKERS = int(os.getenv("API_WORKERS", 1))
 
 # Model configuration
 DEVICE = os.getenv("DEVICE", "cpu")
-MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", 50)) * 1024 * 1024
+MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", 5)) * 1024 * 1024  # Reduced to 5MB
 
 # AWS S3 Configuration
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -29,7 +34,5 @@ AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
-# Model paths
-INSIGHTFACE_MODEL = "buffalo_l"
-os.environ['OMP_NUM_THREADS'] = '1'
-os.environ['MKL_NUM_THREADS'] = '1'
+# Model paths - Using smaller model
+INSIGHTFACE_MODEL = "buffalo_sc"  # Changed from buffalo_l (150MB vs 500MB)
