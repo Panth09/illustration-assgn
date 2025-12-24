@@ -1,6 +1,7 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": ".next",
+  "projectSettings": {
+    "rootDirectory": "frontend"
+  },
   "env": {
     "NEXT_PUBLIC_API_URL": "https://illustration-assgn.onrender.com"
   }
