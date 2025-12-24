@@ -7,7 +7,7 @@ numpy==1.24.3
 opencv-python==4.9.0.80
 torch==2.1.2
 torchvision==0.16.2
-diffusers==0.25.1
+diffusers==0.28.0
 transformers==4.36.2
 facenet-pytorch==2.5.0
 insightface==0.7.3
