@@ -7,6 +7,8 @@ from pathlib import Path
 import uuid
 from datetime import datetime
 import cv2
+import asyncio
+from threading import Thread
 
 from config import UPLOAD_DIR, OUTPUT_DIR, MAX_UPLOAD_SIZE, API_HOST, API_PORT
 from face_detector import FaceDetector
@@ -38,25 +40,40 @@ app.add_middleware(
 # Initialize services
 face_detector = None
 illustration_styler = None
+models_ready = False
 
 
 def initialize_models():
-    """Initialize ML models on startup"""
-    global face_detector, illustration_styler
+    """Initialize ML models in background"""
+    global face_detector, illustration_styler, models_ready
     try:
-        logger.info("Initializing models...")
+        logger.info("Initializing models in background...")
         face_detector = FaceDetector()
         illustration_styler = IllustrationStyler()
+        models_ready = True
         logger.info("Models initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize models: {e}")
-        raise
+        models_ready = False
 
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize models on application startup"""
-    initialize_models()
+    """Start model initialization in background thread"""
+    logger.info("Starting background model initialization...")
+    thread = Thread(target=initialize_models, daemon=True)
+    thread.start()
+    logger.info("Server ready - models loading in background")
+
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "Illustration Personalization API",
+        "models_ready": models_ready,
+        "status": "ready" if models_ready else "loading models..."
+    }
 
 
 @app.get("/health")
@@ -64,6 +81,7 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
+        "models_ready": models_ready,
         "timestamp": datetime.now().isoformat(),
     }
 
@@ -72,13 +90,13 @@ async def health_check():
 async def detect_face(file: UploadFile = File(...)):
     """
     Detect faces in uploaded image
-
-    Args:
-        file: Uploaded image file
-
-    Returns:
-        Face detection results with embeddings and bounding boxes
     """
+    if not models_ready:
+        raise HTTPException(
+            status_code=503, 
+            detail="Models still loading, please wait a moment and try again"
+        )
+    
     if not face_detector:
         raise HTTPException(status_code=503, detail="Face detector not initialized")
 
@@ -120,14 +138,13 @@ async def personalize_illustration(
 ):
     """
     Personalize an illustration with a child's photo
-
-    Args:
-        child_photo: Uploaded child's photo
-        illustration: Uploaded illustration template
-
-    Returns:
-        Personalized illustration image
     """
+    if not models_ready:
+        raise HTTPException(
+            status_code=503, 
+            detail="Models still loading, please wait a moment and try again"
+        )
+    
     if not face_detector or not illustration_styler:
         raise HTTPException(status_code=503, detail="Services not initialized")
 
@@ -186,17 +203,8 @@ async def personalize_illustration(
 
 @app.get("/download/{file_id}")
 async def download_result(file_id: str):
-    """
-    Download personalized illustration
-
-    Args:
-        file_id: Output file ID
-
-    Returns:
-        Personalized image file
-    """
+    """Download personalized illustration"""
     try:
-        # Find file with this ID
         file_path = None
         for f in OUTPUT_DIR.glob(f"{file_id}*"):
             file_path = f
@@ -216,15 +224,7 @@ async def download_result(file_id: str):
 
 @app.post("/upload-illustration-template")
 async def upload_template(file: UploadFile = File(...)):
-    """
-    Upload an illustration template for future use
-
-    Args:
-        file: Illustration template file
-
-    Returns:
-        Template file ID and path
-    """
+    """Upload an illustration template for future use"""
     try:
         content = await file.read()
         if len(content) > MAX_UPLOAD_SIZE:
@@ -253,7 +253,6 @@ async def upload_template(file: UploadFile = File(...)):
 
 if __name__ == "__main__":
     import uvicorn
-    import os
 
     # CRITICAL: Use PORT from environment (Render requirement)
     port = int(os.getenv("PORT", 8000))
