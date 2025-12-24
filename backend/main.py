@@ -255,12 +255,12 @@ if __name__ == "__main__":
     import uvicorn
     import os
 
-    # Use PORT env var if available (Heroku), otherwise use API_PORT
-    port = int(os.getenv("PORT", API_PORT))
-
+    # Render uses PORT environment variable
+    port = int(os.getenv("PORT", 8000))
+    
     uvicorn.run(
         "main:app",
-        host=API_HOST,
+        host="0.0.0.0",  # Must be 0.0.0.0, not API_HOST
         port=port,
         reload=False,
         workers=1,

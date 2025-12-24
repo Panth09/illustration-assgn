@@ -31,3 +31,5 @@ AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 # Model paths
 INSIGHTFACE_MODEL = "buffalo_l"
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
