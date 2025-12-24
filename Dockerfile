@@ -2,13 +2,14 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install system dependencies including build tools
+# Install system dependencies including build tools and OpenCV dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
     libsm6 \
     libxext6 \
     libxrender-dev \
     libgomp1 \
+    libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements from backend
