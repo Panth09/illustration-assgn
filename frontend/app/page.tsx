@@ -126,7 +126,7 @@ export default function Home() {
           Illustration Personalizer
         </h1>
         <p className="text-center text-gray-600 mb-8">
-          Upload your child's photo and an illustration template to create a personalized version
+          Upload your child&apos;s photo and an illustration template to create a personalized version
         </p>
 
         {error && (
@@ -151,7 +151,7 @@ export default function Home() {
                   />
                 ) : (
                   <UploadDropzone
-                    label="Upload Child's Photo"
+                    label="Upload Child&apos;s Photo"
                     onFile={setChildPhoto}
                   />
                 )}
@@ -189,9 +189,9 @@ export default function Home() {
             <div className="mt-8 pt-8 border-t">
               <h3 className="text-lg font-semibold mb-4 text-gray-800">How it works:</h3>
               <ol className="list-decimal list-inside space-y-2 text-gray-600">
-                <li>Upload a clear photo of your child's face</li>
+                <li>Upload a clear photo of your child&apos;s face</li>
                 <li>Upload an illustration or template image</li>
-                <li>Our AI will detect the child's face and stylize it</li>
+                <li>Our AI will detect the child&apos;s face and stylize it</li>
                 <li>The stylized face will be inserted into the illustration</li>
                 <li>Download your personalized illustration</li>
               </ol>
