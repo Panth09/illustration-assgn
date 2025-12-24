@@ -5,12 +5,20 @@ WORKDIR /app
 # Install system dependencies including build tools and OpenCV dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
+    curl \
     libsm6 \
     libxext6 \
     libxrender-dev \
     libgomp1 \
     libgl1 \
     libglib2.0-0 \
+    libxext-dev \
+    libharfbuzz0b \
+    libwebp6 \
+    libtiff5 \
+    libjasper1 \
+    libjpeg-dev \
+    libpng-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements from backend
@@ -30,7 +38,7 @@ EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/health')"
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Run application
 CMD ["python", "main.py"]
