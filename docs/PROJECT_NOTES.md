@@ -427,3 +427,23 @@ export DEVICE=cpu
 **Project Status:** ✅ MVP Complete | 🚀 Ready for Enhancement
 
 Last Updated: December 24, 2025
+
+---
+
+## Model Choice, Limitations, and Improvements
+
+### Model Choice
+We chose an Instant-ID inspired approach for face stylization. This method balances speed, identity preservation, and resource efficiency, making it suitable for real-time, child-friendly illustration. It uses face embeddings for identity and lightweight computer vision filters for stylization, avoiding heavy diffusion models.
+
+### Limitations
+- Face blending can still show minor artifacts, especially with complex backgrounds or lighting.
+- Stylization is limited to cartoon-like effects; realism and style diversity are constrained.
+- The pipeline may struggle with low-resolution or occluded faces.
+- No fine-grained user control over style or blending strength.
+
+### Improvements for v2
+- Integrate more advanced diffusion models (e.g., SDXL, ControlNet) for higher-quality, diverse styles.
+- Add user-adjustable style and blending parameters.
+- Improve face detection and alignment for edge cases.
+- Support batch processing and more illustration templates.
+- Optimize for GPU acceleration and faster inference.
