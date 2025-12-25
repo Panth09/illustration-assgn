@@ -77,13 +77,7 @@ class IllustrationStyler:
     def stylize_face(self, face_image):
         """
         Convert face to stylized/illustrated version
-        Memory-optimized cartoon filter approach
-
-        Args:
-            face_image: Face image array (BGR)
-
-        Returns:
-            Stylized face image
+        Enhanced: more natural, less cartoonish, better edge handling
         """
         try:
             # Resize if too large to save memory
@@ -93,40 +87,40 @@ class IllustrationStyler:
                 scale = max_size / max(h, w)
                 new_w, new_h = int(w * scale), int(h * scale)
                 face_image = cv2.resize(face_image, (new_w, new_h))
-            
+
+            # Convert BGR to LAB for color transfer later
+            face_lab = cv2.cvtColor(face_image, cv2.COLOR_BGR2LAB)
+
             # Convert BGR to RGB
             face_rgb = cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB)
 
             # Bilateral filtering for smoothing while preserving edges
-            smooth = cv2.bilateralFilter(face_rgb, 7, 50, 50)  # Reduced kernel size
+            smooth = cv2.bilateralFilter(face_rgb, 9, 75, 75)
 
-            # Detect edges
+            # Edge enhancement (subtle)
             gray = cv2.cvtColor(smooth, cv2.COLOR_RGB2GRAY)
-            edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 2)
-
-            # Create inverted edges
+            edges = cv2.Canny(gray, 60, 120)
+            edges = cv2.GaussianBlur(edges, (3, 3), 0)
             edges = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
-            edges = 255 - edges
+            # Blend edges with smooth image
+            stylized = cv2.addWeighted(smooth, 0.92, edges, 0.08, 0)
 
-            # Combine
-            mask = cv2.cvtColor(edges, cv2.COLOR_RGB2GRAY)
-            stylized = cv2.bitwise_and(smooth, smooth, mask=mask)
-
-            # Quantize colors for cartoon effect (reduced clusters)
+            # Reduce color quantization for more natural look
             data = stylized.reshape((-1, 3))
             data = np.float32(data)
             criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-            _, labels, centers = cv2.kmeans(data, 5, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
+            K = 8  # More clusters for less cartoonish effect
+            _, labels, centers = cv2.kmeans(data, K, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS)
             centers = np.uint8(centers)
             result = centers[labels.flatten()]
             stylized = result.reshape(stylized.shape)
 
-            logger.info("Face stylization completed")
-            
+            logger.info("Face stylization completed (natural style)")
+
             # Clear memory
-            del data, labels, centers, result, smooth, edges, mask
+            del data, labels, centers, result, smooth, edges
             gc.collect()
-            
+
             return stylized
 
         except Exception as e:
@@ -136,14 +130,7 @@ class IllustrationStyler:
     def insert_face_into_illustration(self, illustration_path, stylized_face, face_coords):
         """
         Insert the stylized face into the illustration template
-
-        Args:
-            illustration_path: Path to illustration template
-            stylized_face: Stylized face image
-            face_coords: (x1, y1, x2, y2) coordinates
-
-        Returns:
-            Final composite image
+        Enhanced: seamless cloning, color transfer, feathered mask
         """
         try:
             # Load illustration
@@ -168,19 +155,45 @@ class IllustrationStyler:
             # Resize stylized face to match target dimensions
             resized_face = cv2.resize(stylized_face, (target_w, target_h))
 
-            # Blend with alpha
-            alpha = 0.8
-            result = illustration.copy()
-            result[y1:y2, x1:x2] = cv2.addWeighted(
-                resized_face, alpha, illustration[y1:y2, x1:x2], 1 - alpha, 0
-            )
+            # Color transfer from illustration region to stylized face (LAB mean/var matching)
+            try:
+                src_lab = cv2.cvtColor(resized_face, cv2.COLOR_RGB2LAB)
+                dst_lab = cv2.cvtColor(illustration[y1:y2, x1:x2], cv2.COLOR_BGR2LAB)
+                for i in range(3):
+                    src_mean, src_std = src_lab[..., i].mean(), src_lab[..., i].std()
+                    dst_mean, dst_std = dst_lab[..., i].mean(), dst_lab[..., i].std()
+                    if src_std > 0:
+                        src_lab[..., i] = ((src_lab[..., i] - src_mean) * (dst_std / src_std) + dst_mean).clip(0, 255)
+                color_matched = cv2.cvtColor(src_lab.astype(np.uint8), cv2.COLOR_LAB2RGB)
+            except Exception as e:
+                logger.warning(f"Color transfer failed: {e}"); color_matched = resized_face
 
-            logger.info(f"Face inserted into illustration at coords {face_coords}")
-            
+            # Create feathered mask for smooth blending
+            mask = np.zeros((target_h, target_w), dtype=np.uint8)
+            cv2.ellipse(mask, (target_w//2, target_h//2), (target_w//2-2, target_h//2-2), 0, 0, 360, 255, -1)
+            mask = cv2.GaussianBlur(mask, (21, 21), 0)
+
+            # Center for seamlessClone
+            center = (x1 + target_w // 2, y1 + target_h // 2)
+            # Convert color_matched to BGR for seamlessClone
+            color_matched_bgr = cv2.cvtColor(color_matched, cv2.COLOR_RGB2BGR)
+            try:
+                result = cv2.seamlessClone(color_matched_bgr, illustration, mask, center, cv2.NORMAL_CLONE)
+            except Exception as e:
+                logger.warning(f"SeamlessClone failed: {e}, falling back to alpha blend")
+                # Fallback: alpha blend with feathered mask
+                roi = illustration[y1:y2, x1:x2].copy()
+                mask_f = mask.astype(float)/255.0
+                blended = (color_matched_bgr * mask_f[...,None] + roi * (1-mask_f[...,None])).astype(np.uint8)
+                result = illustration.copy()
+                result[y1:y2, x1:x2] = blended
+
+            logger.info(f"Face inserted into illustration at coords {face_coords} (seamless blend)")
+
             # Clear memory
-            del illustration, resized_face
+            del illustration, resized_face, color_matched, mask
             gc.collect()
-            
+
             return result
 
         except Exception as e:
